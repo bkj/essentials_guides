@@ -209,7 +209,7 @@ so that this script can see the implementation you'll be writing in the next ste
 
 This is the entirity of `examples/my_sssp.cu`.  As noted above, this won't compile, because `gunrock/applications/my_sssp.hxx` doesn't exist yet ... so let's move on to implementing that.
 
-For reference, tour entire `examples/my_sssp.cu` should look like the code [here](https://gist.github.com/bkj/3a4ba332f76e6e52dd51908891f2d5d4).
+For reference, tour entire `examples/my_sssp.cu` should look like the code [here](https://github.com/bkj/essentials_guides/blob/main/0_getting_started/examples/my_sssp/my_sssp.cu).
 
 ## 4) Create `include/gunrock/applications/my_sssp.hxx`
 
@@ -514,7 +514,7 @@ float run(graph_t& G,
 
 And now you're done! 
 
-Your entire `include/gunrock/applications/my_sssp.hxx` file should look like the code [here](https://gist.github.com/bkj/78da5a4303fd109d7f9ef49c675cc8ba).  (Note the `#pragma once` and `namespace`'s at the top.)
+Your entire `include/gunrock/applications/my_sssp.hxx` file should look like the code [here](https://github.com/bkj/essentials_guides/blob/main/0_getting_started/include/essentials/applications/sssp.hxx).  (Note the `#pragma once` and `namespace`'s at the top.)
 
 ## Run!
 
