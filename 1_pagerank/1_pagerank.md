@@ -492,7 +492,7 @@ Finally -- now that we've implemented our `essentials` version of `pagerank`, we
   'numba_20t'  : 151,
   'cpp_1t'     : 337,
   'cpp_20t'    : 91,
-  'essentials' : 8.4     // (V100 GPU on AWS p3 instance)
+  'essentials' : 8.4     # (V100 GPU on AWS p3 instance)
 }
 ```
 
