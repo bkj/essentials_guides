@@ -4,6 +4,12 @@ This document is intended as a reference for someone trying to implement their f
 
 As an example, I'll walk you through re-implementing single-source shortest paths (`sssp`).  This application already exists in `essentials`, but we'll use a different name (`my_sssp`) so you can see all of the steps.
 
+## Application Overview
+
+Before writing any `essentials` code, let's walk through the single-source shortest paths algorithm that we'll be implementing.
+
+
+
 ## Directory Structure
 
 To implement `my_sssp`, you'll need to modify 1 existing file:
@@ -514,7 +520,7 @@ float run(graph_t& G,
 
 And now you're done! 
 
-Your entire `include/gunrock/applications/my_sssp.hxx` file should look like the code [here](https://github.com/bkj/essentials_guides/blob/main/0_getting_started/include/essentials/applications/sssp.hxx).  (Note the `#pragma once` and `namespace`'s at the top.)
+Your entire `include/gunrock/applications/my_sssp.hxx` file should look like the code [here](https://github.com/bkj/essentials_guides/blob/main/0_getting_started/include/essentials/applications/my_sssp.hxx).  (Note the `#pragma once` and `namespace`'s at the top.)
 
 ## Run!
 
