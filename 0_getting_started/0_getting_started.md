@@ -331,7 +331,7 @@ struct result_t {
 
 ### c) `problem` struct
 
-The `problem` struct holds data structures that are used internally by the application. 
+The `problem` struct holds data structures that are used internally by the application, as well as the graph we're running our application on.
 
 `problem` has two methods -- `init` and `reset` -- which are described inline below.
 
