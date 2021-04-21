@@ -497,3 +497,14 @@ Finally -- now that we've implemented our `essentials` version of `pagerank`, we
 ```
 
 The `essentials` application runs `rmat18` in 8.4ms -- which is ~ 11x faster than our fastest CPU implementation `cpp_20t` and ~ 95x faster than the `pagerank` implementation you'd likely use in `networkx`.
+
+Also, note that we are in the process of writing Python bindings for `essentials` implemented [here](https://github.com/bkj/python_essentials).  These bindings use the `pytorch` library, so the Python user has control over moving data between CPU and GPU.  This allows `essentials` applications to be integrated tightly with other Python-based GPU code, without incurring uneccessary data transfer overhead.
+
+## Conclusion
+
+After reading, hopefully you have a sense of tools and methods for a plausible sequence of optimizations that an application developer might use to try to write the most performance version of their application. 
+
+In summary, key takeaways from this experiment are:
+  - Careful use of python libraries (`scipy` and `numba`) can give huge performance boosts over "base" Python
+  - Yet more gains can usually be had by writing multithreaded CPU code in C or C++.
+  - For the highest performance, you can take advantage of the suite of optimized operators available in the `essentials` library, without particularly deep knowledge of CUDA / GPU programming.
