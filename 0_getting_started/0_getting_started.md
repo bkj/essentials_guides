@@ -6,8 +6,86 @@ As an example, I'll walk you through re-implementing single-source shortest path
 
 ## Application Overview
 
-Before writing any `essentials` code, let's walk through the single-source shortest paths algorithm that we'll be implementing.
+Before writing any `essentials` code, let's walk through the single-source shortest paths algorithm that we'll be implementing.  We'll implement a fully functional algorithm in Python, so you can test and modify an actual piece of code.
 
+Note that this SSSP algorithm looks quite a bit different from a standard Dijkstra's algorithm.  This kind of algorithmic re-formulation is often necessary to expose a lot of parallelism in the algorithm and to use the highly-optimized operators in `essentials`.  (If you're familiar w/ `gunrock` programming, this kind of thing should be familiar.)
+
+Details are given inline below.
+
+```python
+import numpy as np
+from scipy.io import mmread
+
+def my_sssp(csr, single_source, distances):
+  # initialize distance array
+  distances[:]             = np.inf
+  distances[single_source] = 0
+  
+  # initialize internal datastructures
+  n_vertices = csr.shape[0]
+  visited    = np.zeros(n_vertices) - 1
+  
+  # intialize the frontier
+  frontier_in  = [single_source]
+  frontier_out = []
+  
+  iteration = 0
+  while len(frontier_in) > 0:
+    
+    # --
+    # advance step
+    
+    # For each vertex `source` in the frontier:
+    #  For each `neighbor` of `source` in the graph:
+    #   Check whether path to `neighbor` through `source` is shorter than current distance to `neighbor`
+    #   If so, update distance and add `neighbor` to frontier of active vertices
+    
+    for source in frontier_in:
+      neighbors = csr.indices[csr.indptr[source]:csr.indptr[source + 1]]
+      weights   = csr.data[csr.indptr[source]:csr.indptr[source + 1]]
+      for neighbor, weight in zip(neighbors, weights):
+        new_dist = distances[source] + weight
+        old_dist = distances[neighbor]
+        distances[neighbor] = min(distances[neighbor], new_dist)
+        if new_dist < old_dist:
+          frontier_out.append(neighbor)
+    
+    frontier_in  = frontier_out
+    frontier_out = []
+    
+    # --
+    # filter step
+    
+    # Remove vertices w/ 0 outdegree from the frontier; and
+    # De-duplicate the frontier; and
+    # Record step at which the shortest path to `vertex` was found
+    
+    for vertex in frontier_in:
+      
+      n_neighbors = csr.indptr[source] - csr.indptr[source + 1]
+      if n_neighbors == 0: continue
+      
+      if visited[vertex] == iteration: continue
+      visited[vertex] = iteration
+      
+      frontier_out.append(vertex)
+    
+    frontier_in  = frontier_out
+    frontier_out = []
+    
+    iteration += 1
+  
+
+# --
+# Run w/ small test dataset
+
+csr           = mmread('../datasets/chesapeake.mtx').tocsr()
+n_vertices    = csr.shape[0]
+single_source = 0
+distances     = np.zeros(n_vertices)
+my_sssp(csr, single_source, distances)
+print(distances)
+```
 
 
 ## Directory Structure
