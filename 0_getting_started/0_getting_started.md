@@ -10,6 +10,8 @@ Before writing any `essentials` code, let's walk through the single-source short
 
 Note that this SSSP algorithm looks quite a bit different from a standard Dijkstra's algorithm.  This kind of algorithmic re-formulation is often necessary to expose a lot of parallelism in the algorithm and to use the highly-optimized operators in `essentials`.  (If you're familiar w/ `gunrock` programming, this kind of thing should be familiar.)
 
+As we go through the `essentials` implementation, refer back to this implementation to see the one-to-one correspondence between this simple (and very slow...) Python implementation and the fast `essentials` code.
+
 Details are given inline below.
 
 ```python
@@ -41,12 +43,16 @@ def my_sssp(csr, single_source, distances):
     #   If so, update distance and add `neighbor` to frontier of active vertices
     
     for source in frontier_in:
+      
       neighbors = csr.indices[csr.indptr[source]:csr.indptr[source + 1]]
       weights   = csr.data[csr.indptr[source]:csr.indptr[source + 1]]
+      
       for neighbor, weight in zip(neighbors, weights):
+        
         new_dist = distances[source] + weight
         old_dist = distances[neighbor]
         distances[neighbor] = min(distances[neighbor], new_dist)
+        
         if new_dist < old_dist:
           frontier_out.append(neighbor)
     
