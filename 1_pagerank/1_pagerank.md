@@ -245,5 +245,255 @@ Also note that my C++ version is not "highly optimized", and it's virtually guar
 
 It's written and maintaing by John Owen's group at UC-Davis ECE -- @neoblizz is the primary library author.
 
-If you're not familiar with `essentials`, you may want to look at the  [Getting Started Guide](https://github.com/bkj/essentials_guides/tree/main/0_getting_started), which walks through the structure of an `essentials` application.  However, hopefully the information below can give you a sense of what writing an `essentials` application looks like (not _too_ difficult, even without prior GPU experience), and the kinds of performance improvements you can expect (big!).
+If you're not familiar with `essentials`, I'd highly recommend looking at the [Essentials Getting Started Guide](https://github.com/bkj/essentials_guides/tree/main/0_getting_started), which walks through the structure of an `essentials` application.  However, hopefully the information below can give you a sense of what writing an `essentials` application looks like (not _too_ difficult, even without prior GPU experience), and the kinds of performance improvements you can expect (substantial!).
 
+Logically, the `essentials` implementations is (nearly) identical to the other implementations desribed in this document -- if you get confused, you can reference the Python implementations to remember all of the steps needed for `pagerank`.
+
+`essentials` applications are implemented using four structs -- `param`, `result`, `problem` and `enactor`.  The structs for `pagerank` are shown below.  If this is your first time seeing `essentials` code, note that some of the code below is boilerplate code, which doesn't need to change across `essentials` applications.  There's a learning curve to this, but after implementing a couple of `essentials` applications it should (hopefully) be relatively straightforward.
+
+### `param` struct
+
+The `param` struct holds user supplied parameters.  In this case, it's the `pagerank` `alpha` parameter (eg, random jump probability) and the convergence tolerance threshold `tol`.
+
+```c++
+template <typename weight_t>
+struct param_t {
+  weight_t alpha;
+  weight_t tol;
+  param_t(weight_t _alpha, weight_t _tol) : alpha(_alpha), tol(_tol) {}
+};
+```
+
+### `result` struct
+
+The `result` struct holds the data structures that will get passed back to the user as results.  In this case, this is just the array of `pagerank` values, `x`.
+
+```c++
+template <typename weight_t>
+struct result_t {
+  weight_t* x;
+  result_t(weight_t* _x) : x(_x) {}
+};
+```
+
+### `problem` struct
+
+The `problem` struct holds data structures that are used internally by the application, as well as the graph we're running our application on.
+
+`problem` also has two methods -- `init` and `reset` -- which are shown below.  Refer to the [Getting Started Guide](https://github.com/bkj/essentials_guides/tree/main/0_getting_started) for more details.
+
+```c++
+template <typename graph_t, typename param_type, typename result_type>
+struct problem_t : gunrock::problem_t<graph_t> {
+  param_type param;
+  result_type result;
+
+  problem_t(graph_t& G,
+            param_type& _param,
+            result_type& _result,
+            std::shared_ptr<cuda::multi_context_t> _context)
+      : gunrock::problem_t<graph_t>(G, _context),
+        param(_param),
+        result(_result) {}
+
+  using vertex_t = typename graph_t::vertex_type;
+  using edge_t = typename graph_t::edge_type;
+  using weight_t = typename graph_t::weight_type;
+
+  thrust::device_vector<weight_t> xlast;     // pagerank values from previous iteration
+  
+  thrust::device_vector<weight_t> iweights;  // alpha * 1 / (sum of outgoing weights) -- used to determine
+                                             // out of mass spread from src to dst
+
+  void init() override {
+    auto g = this->get_graph();
+    auto n_vertices = g.get_number_of_vertices();
+    
+    // Allocate memory
+    xlast.resize(n_vertices);
+    iweights.resize(n_vertices);
+  }
+
+  void reset() override {
+    // Execution policy for a given context (using single-gpu).
+    auto policy = this->context->get_context(0)->execution_policy();
+
+    auto g = this->get_graph();
+
+    auto alpha      = this->param.alpha;
+    auto n_vertices = g.get_number_of_vertices();
+    
+    // Fill `x` w/ 1 / n_vertices
+    thrust::fill_n(policy, this->result.x, n_vertices, 1.0 / n_vertices);
+
+    // Fill `xlast` with 0's
+    thrust::fill_n(policy, xlast.begin(), n_vertices, 0);
+
+    // Fill `iweights` with the sum of the outgoing edge weights,
+    // by applying the `get_weight` lambda function to all nodes in the graph
+    auto get_weight = [=] __device__(const int& i) -> weight_t {
+      weight_t val = 0;
+
+      edge_t start = g.get_starting_edge(i);
+      edge_t end   = start + g.get_number_of_neighbors(i);
+      for (edge_t offset = start; offset < end; offset++) {
+        val += g.get_edge_weight(offset);
+      }
+
+      return val != 0 ? alpha / val : 0;
+    };
+
+    thrust::transform(policy, thrust::counting_iterator<vertex_t>(0),
+                      thrust::counting_iterator<vertex_t>(n_vertices),
+                      iweights.begin(), get_weight);
+  }
+};
+```
+
+### `enactor` struct
+
+The `enactor` struct is where the computation of the application actually happens.  `enactor` has three methods:
+  - `prepare_frontier` -- intialize the vertex frontier for the first iteration
+  - `loop` -- logic for a single iteration of the algorithm
+  - `is_converged` -- check whether the algorithm has converged and should terminate
+
+The methods are detailed inline below.
+
+```c++
+template <typename problem_t>
+struct enactor_t : gunrock::enactor_t<problem_t> {
+  using gunrock::enactor_t<problem_t>::enactor_t;
+
+  using vertex_t = typename problem_t::vertex_t;
+  using edge_t = typename problem_t::edge_t;
+  using weight_t = typename problem_t::weight_t;
+```
+
+#### prepare_frontier
+
+`prepare_frontier` initializes the frontier for the first iteration of the algorithm.  In this case, we want the frontier to hold _all_ of the nodes in the graph.
+
+```c++
+  void prepare_frontier(frontier_t<vertex_t>* f,
+                        cuda::multi_context_t& context) override {
+    auto P = this->get_problem();
+    auto G = P->get_graph();
+    auto n_vertices = G.get_number_of_vertices();
+
+    // Fill the frontier with a sequence of vertices from 0 -> n_vertices.
+    f->sequence((vertex_t)0, n_vertices, context.get_context(0)->stream());
+  }
+```
+
+#### loop
+
+`loop` implements a single iteration of the `pagerank` algorithm.  Logically, it is almost identical to the section of code inside the Python `while True:` loop in the implementations above.
+
+```c++
+  void loop(cuda::multi_context_t& context) override {
+    // Get data structures
+    auto E = this->get_enactor();
+    auto P = this->get_problem();
+    auto G = P->get_graph();
+    auto n_vertices = G.get_number_of_vertices();
+    auto x = P->result.x;
+    auto xlast = P->xlast.data().get();
+    auto iweights = P->iweights.data().get();
+    auto alpha = P->param.alpha;
+
+    auto policy = this->context->get_context(0)->execution_policy();
+
+    // Copy p to xlast
+    thrust::copy_n(policy, x, n_vertices, xlast);
+    
+    // Fill `x` with (1 - alpha) / n_vertices
+    thrust::fill_n(policy, x, n_vertices, (1 - alpha) / n_vertices);
+
+    auto spread_op = [p, xlast, iweights] __host__ __device__(
+                         vertex_t const& src, vertex_t const& dst,
+                         edge_t const& edge, weight_t const& weight) -> bool {
+      
+      // Compute the update to push to neighbors
+      weight_t update = xlast[src] * iweights[src] * weight;
+      
+      // Push the update to neighbors
+      // Note this needs an atomic operation because multiple `src` nodes might be writing to the same
+      // `dst` node
+      math::atomic::add(x + dst, update);
+      return false;
+    };
+
+    // Run an optimized `essentials` operator to map `spread_op` across all the edges of the graph
+    operators::advance::execute<operators::advance_type_t::vertex_to_vertex,
+                                operators::advance_direction_t::forward,
+                                operators::load_balance_t::merge_path>(
+        G, E, spread_op, context);
+
+    // HACK!
+    // Normally, `advance` produces a new frontier of active nodes.  However, for pagerank, we
+    // want all nodes to be active all of the time.  We can make this happen by (un)flipping the input
+    // and output frontiers after the `advance` operator.
+    // (This should be smoothed out in future `essentials` versions.)
+    E->swap_frontier_buffers();
+  }
+```
+
+#### `is_converged`
+
+Determine whether the algorithm has converged by checking whether the absolute difference between the current and last iteration is below some threshold.
+
+This is identical to the Python implementations shown above, but written using `thrust` operators that run on the GPU.
+
+```c++
+  virtual bool is_converged(cuda::multi_context_t& context) {
+    if (this->iteration == 0)
+      return false;
+
+    auto P = this->get_problem();
+    auto G = P->get_graph();
+    auto tol = P->param.tol;
+
+    auto n_vertices = G.get_number_of_vertices();
+    auto x = P->result.x;
+    auto xlast = P->xlast.data().get();
+
+    auto abs_diff = [=] __device__(const int& i) -> weight_t {
+      return abs(x[i] - xlast[i]);
+    };
+
+    auto policy = this->context->get_context(0)->execution_policy();
+    
+    // Map `abs_diff` across all vertices, then take the maximum
+    float err = thrust::transform_reduce(
+        policy, thrust::counting_iterator<vertex_t>(0),
+        thrust::counting_iterator<vertex_t>(n_vertices), abs_diff,
+        (weight_t)0.0, thrust::maximum<weight_t>());
+
+    return err < tol;
+  }
+};
+```
+
+Clearly, the `essentials` application is quite a bit more verbose than a Python implementation.  However, the logic is essentially the same.
+
+A fully functional `essentials` application involves implementing a bit more wrapper code plus a command line driver to run the application.  The full code for `essentials` `pagerank` is visible in these two files:
+ - Full code described above: [include/gunrock/applications/pr.hxx](https://github.com/gunrock/essentials/blob/master/include/gunrock/applications/pr.hxx)
+ - Command line driver: [examples/pr/pr.cu](https://github.com/gunrock/essentials/blob/master/examples/pr/pr.cu)
+
+Finally -- now that we've implemented our `essentials` version of `pagerank`, we can benchmark and compare against the various implementations detailed above.
+
+```python
+{
+  'read'       : 5319, 
+  'convert'    : 55972, 
+  'python'     : 440489, 
+  'scipy'      : 796, 
+  'numba_1t'   : 492,
+  'numba_20t'  : 151,
+  'cpp_1t'     : 337,
+  'cpp_20t'    : 91,
+  'essentials' : 8.4     // (V100 GPU on AWS p3 instance)
+}
+```
+
+The `essentials` application runs `rmat18` in 8.4ms -- which is ~ 11x faster than our fastest CPU implementation `cpp_20t` and ~ 95x faster than the `pagerank` implementation you'd likely use in `networkx`.
